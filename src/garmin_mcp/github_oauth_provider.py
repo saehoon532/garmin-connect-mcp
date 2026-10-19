@@ -218,15 +218,24 @@ class GitHubOAuthProvider(OAuthAuthorizationServerProvider):
                 "saved_at":       now,
             }
             self._store.set(self._redis_key, json.dumps(data, default=str))
-        except Exception as exc:
-            logger.error("Failed to save token store: %s", exc)
+        except Exception:
+            logger.exception("Failed to persist OAuth token store")
+            raise
 
     # ------------------------------------------------------------------ #
     # Client registration (dynamic — Claude registers itself on first use) #
     # ------------------------------------------------------------------ #
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
-        return self._clients.get(client_id)
+        client = self._clients.get(client_id)
+        if client is None and self._store:
+            # Another instance may have registered the client, or this instance
+            # may have started before the persistent store was populated.
+            self._load_store()
+            client = self._clients.get(client_id)
+        if client is None:
+            logger.warning("OAuth client not found: %s (known clients: %d)", client_id, len(self._clients))
+        return client
 
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
         logger.info("Registering OAuth client: %s", client_info.client_id)
